@@ -1,0 +1,13 @@
+[extension]
+id = "mh2_archive"
+name = "MH2 Archive Sync"
+version = "1.0.0"
+author = "Elvaerwyn_MH2"
+description = "Directly downloads asset bundles from community repository."
+
+[runtime]
+package_dirs = ["."]
+sys_paths = ["."]
+
+[project.entry-points]
+"makehuman2.extension" = "mh2_official_tools.mh2_archive.mh2_archive:initialize_extension"
