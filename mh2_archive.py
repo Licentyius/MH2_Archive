@@ -1,5 +1,5 @@
 """
-MakeHuman 2 Community Archive Downloader V3.6a - Elvaerwyn_MH2 2026
+MakeHuman 2 Community Archive Downloader V4.1 - Elvaerwyn_MH2 2026
 Completely Independent Visual Content Browser, Search Engine, Cart & Favorites Matrix
 """
 
@@ -316,9 +316,9 @@ class MH2AssetBrowserPanel(QWidget):
         self.grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         self.grid_scroll.setWidget(self.grid_container)
         layout.addWidget(self.grid_scroll)
-        # ===========================================
+        # ======================================
         # NEW DEEP INSPECTION TAB MATRIX LAYOUT
-        # ===========================================
+        # ======================================
         inspection_group = QGroupBox("Target Package Deep Inspector Matrix")
         inspection_layout = QVBoxLayout(inspection_group)
         inspection_layout.setContentsMargins(4, 4, 4, 4)
@@ -355,20 +355,33 @@ class MH2AssetBrowserPanel(QWidget):
         layout.addWidget(self.progress_bar)
         ops_group = QGroupBox("Dedicated Batch Repository Actions")
         ops_layout = QVBoxLayout(ops_group)
+        
+        # Action Button 1: Download Core (Dynamic Text Hooked)
         self.btn_download = QPushButton("📥 Download Selected Data")
         self.btn_download.setEnabled(False)
         self.btn_download.setStyleSheet("font-weight: bold; padding: 4px;")
         self.btn_download.clicked.connect(self.execute_download_pipeline)
         ops_layout.addWidget(self.btn_download)
+        
+        # ACTION BUTTON  2: Download Everything Currently Visible in the Repo Grid View
+        self.btn_download_repo = QPushButton("🌐 Download All Packs in Visible Repo")
+        self.btn_download_repo.setStyleSheet("font-weight: bold; padding: 4px;")
+        self.btn_download_repo.clicked.connect(self.execute_repo_bulk_download)
+        ops_layout.addWidget(self.btn_download_repo)
+        
+        # Action Button 3: Unpack Core
         self.btn_extract = QPushButton("📦 Unpack And Sort Data Files")
         self.btn_extract.setStyleSheet("font-weight: bold; padding: 4px;")
         self.btn_extract.clicked.connect(self.execute_extraction_pipeline)
         ops_layout.addWidget(self.btn_extract)
+        
+        # Action Button 4: Cleanup Core
         self.btn_cleanup = QPushButton("🧹 Clear Temporary File Cache")
         self.btn_cleanup.setStyleSheet("padding: 3px;")
         self.btn_cleanup.clicked.connect(self.execute_cleanup_pipeline)
         ops_layout.addWidget(self.btn_cleanup)
         layout.addWidget(ops_group)
+
         self.fetch_remote_manifest()
 
     def async_pull_thumbnail(self, url, dest_path, card_widget):
@@ -439,7 +452,7 @@ class MH2AssetBrowserPanel(QWidget):
             if item.widget():
                 item.widget().deleteLater()
 
-        # 1. Establish precise structural prefix mapping lists exactly like your working backup
+        # 1. Establish precise structural prefix mapping lists 
         if self.mh_glob.baseClass is None:
             allowprefix = ["common"]
             parentmesh = None
@@ -472,8 +485,7 @@ class MH2AssetBrowserPanel(QWidget):
             if "packs" in self.manifest_data:
                 packs = self.manifest_data.get("packs", {})
                 for pack_key, pack_info in packs.items():
-                    # 2. STRUCTURAL MATCHING FILTER:
-                    # If the package key does not contain a hyphen, treat it as common and show it
+
                     if "-" not in pack_key:
                         card = MH2AssetCard(pack_key, pack_info, "PACK_MODE", self)
                         self.grid_layout.addWidget(card, row, col)
@@ -481,8 +493,7 @@ class MH2AssetBrowserPanel(QWidget):
                         if col >= columns_limit:
                             col = 0; row += 1
                         continue
-                        
-                    # Splitting checks if the base directory prefix is allowed in our context list
+ 
                     parts = pack_key.split("-")
                     if parts[0] not in allowprefix:
                         continue
@@ -508,7 +519,6 @@ class MH2AssetBrowserPanel(QWidget):
         self.sync_cart_label_counters()
         QApplication.restoreOverrideCursor()
 
-
     def filter_browser_grid(self):
         query = self.search_bar.text().lower().strip()
         for i in range(self.grid_layout.count()):
@@ -532,72 +542,95 @@ class MH2AssetBrowserPanel(QWidget):
     def highlight_asset(self, asset_card):
         self.selected_card = asset_card
         
-        # Focus the image tab when an item is clicked
         if hasattr(self, 'inspect_tabs'):
             self.inspect_tabs.setCurrentIndex(0)
             
-        if asset_card.thumb_label.pixmap() and not asset_card.thumb_label.pixmap().isNull():
-            original_pixmap = asset_card.thumb_label.pixmap()
-            
-            # 1. Establish absolute design boundaries
-            max_allowed_w = 1000
-            max_allowed_h = 750
-            
-            # Get the natural dimensions of the raw thumbnail file
-            native_w = original_pixmap.width()
-            native_h = original_pixmap.height()
-            
-            # Get the available view panel size
-            viewport_w = max(self.image_viewer_scroll.viewport().width() - 10, 420)
-            viewport_h = max(self.image_viewer_scroll.viewport().height() - 10, 300)
-            
-            # 2. RUN AUTONOMOUS CONTAINER MATRIX
-            if native_w <= viewport_w and native_h <= viewport_h:
-                # If the image is smaller than the panel, show it at crisp 100% natural size
-                self.preview_canvas.setPixmap(original_pixmap)
-            else:
-                # If the image is huge, scale it down cleanly to fit the viewport up to 1000px
-                target_w = min(viewport_w, max_allowed_w)
-                target_h = min(viewport_h, max_allowed_h)
-                self.preview_canvas.setPixmap(original_pixmap.scaled(
-                    target_w,
-                    target_h,
-                    Qt.KeepAspectRatio,
-                    Qt.SmoothTransformation
-                ))
+        env = self.mh_glob.env
+        clean_key_base = asset_card.key.replace(".zip", "").replace("_unzip", "").replace("_Kit", "").replace("_kit", "").lower()
+        if clean_key_base.startswith("pd_"): 
+            clean_key_base = clean_key_base[3:]
+        if "wonder_woman" in clean_key_base: 
+            clean_key_base = "ww_kit"
+        if "poison_ivy" in clean_key_base: 
+            clean_key_base = "pduck_ivy"
+
+        possible_names = [
+            asset_card.key + ".thumb", 
+            asset_card.key + ".png", 
+            f"{clean_key_base}_demo.png", 
+            f"{clean_key_base}.thumb"
+        ]
+        manifest_thumb = asset_card.data.get("thumb", "").strip()
+        if manifest_thumb:
+            possible_names.insert(0, os.path.basename(manifest_thumb))
+
+        cache_dir = os.path.normpath(os.path.join(env.path_userdata, "downloads", env.basename, "render"))
+        
+        local_full_res_path = None
+        for name in possible_names:
+            p1 = os.path.normpath(os.path.join(cache_dir, name))
+            if os.path.exists(p1) and os.path.getsize(p1) > 0:
+                local_full_res_path = p1
+                break
+            p2 = os.path.normpath(os.path.join(self.local_install_destination, name))
+            if os.path.exists(p2) and os.path.getsize(p2) > 0:
+                local_full_res_path = p2
+                break
+
+        if local_full_res_path and os.path.exists(local_full_res_path):
+            high_res_pixmap = QPixmap(local_full_res_path)
+        else:
+            high_res_pixmap = asset_card.thumb_label.pixmap()
+
+        if high_res_pixmap and not high_res_pixmap.isNull():
+            available_w = max(self.image_viewer_scroll.viewport().width() - 15, 480)
+            available_h = max(self.image_viewer_scroll.viewport().height() - 15, 340)
+            self.preview_canvas.setPixmap(high_res_pixmap.scaled(
+                available_w, available_h, Qt.KeepAspectRatio, Qt.SmoothTransformation
+            ))
         else:
             self.preview_canvas.clear()
             self.preview_canvas.setText("📦 Pack Staged\n[No Preview Cache discovered]")
+
+        # CHECK ON-DISK AVAILABILITY FOR CLEARER LOGGING
+        target_zip_file = os.path.normpath(os.path.join(self.local_install_destination, asset_card.key if asset_card.key.endswith(".zip") else f"{asset_card.key}.zip"))
+        disk_status = "🟢 [STAGED & READY TO UNPACK]" if os.path.exists(target_zip_file) else "❌ [NOT DOWNLOADED YET]"
             
         if asset_card.mode == "PACK_MODE":
             pack_info = asset_card.data
             metadata_text = (
                 f"== PACKAGE IDENTITY ARCHIVE ==\n"
-                f"ID KEY:      {asset_card.key}\n"
+                f"TARGET PACK: {asset_card.key}\n"
+                f"STATUS:      {disk_status}\n"
                 f"DESCRIPTION: {pack_info.get('descr', 'No description listed.')}\n"
                 f"FILE SIZE:   {pack_info.get('size', 'Unknown')} MB\n"
-                f"TARGET DEST: {asset_card.browser.local_install_destination if hasattr(asset_card, 'browser') else 'Active'}"
+                f"CACHE PATH:  {target_zip_file}"
             )
         else:
             metadata_text = (
                 f"== INDIVIDUAL ASSET LOGS ==\n"
                 f"ID INDEX:    {str(asset_card.data.get('id', asset_card.key))}\n"
                 f"TITLE:       {asset_card.data.get('title', 'Generic Bundle')}\n"
-                f"FILE COUNT:  {len(asset_card.data.get('files',))}\n"
+                f"STATUS:      {disk_status}\n"
+                f"FILE COUNT:  {len(asset_card.data.get('files', []))}\n"
                 f"ROUTING:     Staging Stream active"
             )
         self.meta_display.setText(metadata_text)
+        
+        # DYNAMIC BUTTON TEXT INTERCHANGER
+        if self.current_view_mode == "CART" or len(self.download_cart) > 1:
+            self.btn_download.setText(f"📥 Download All in Cart ({len(self.download_cart)} Items)")
+        else:
+            self.btn_download.setText(f"📥 Download Highlighted Pack")
+            
         self.btn_download.setEnabled(True)
 
-
     def execute_download_pipeline(self):
-        if not self.download_cart and self.selected_card:
-            self.active_batch_processing_queue = [self.selected_card.key]
-        else:
-            self.active_batch_processing_queue = list(self.download_cart)
+
+        self.active_batch_processing_queue = list(self.download_cart)
             
         if not self.active_batch_processing_queue:
-            QMessageBox.information(self, "Queue Empty", "Please select individual items or add elements to your Cart first.")
+            QMessageBox.information(self, "Cart Empty", "Your Cart is currently empty.\nPlease click '+ Cart' on the assets you want to download first.")
             return
             
         self.btn_download.setEnabled(False)
@@ -613,6 +646,7 @@ class MH2AssetBrowserPanel(QWidget):
             QMessageBox.information(self, "Download Complete", "Staged operations built successfully! Ready to run Extract loops.")
             return
 
+        # Safely extracts the clean text string filename from the front of the queue array list
         target_key = str(self.active_batch_processing_queue[0]).strip()
 
         if "packs" in self.manifest_data and target_key in self.manifest_data["packs"]:
@@ -631,7 +665,8 @@ class MH2AssetBrowserPanel(QWidget):
         if repo_path.startswith("http"):
             if "://githubusercontent.com" in repo_path:
                 parts = repo_path.split("://githubusercontent.com")[-1].split("/")
-                repo_path = f"{parts[0]}/{parts[1]}"
+                if len(parts) >= 2:
+                    repo_path = f"{parts[0]}/{parts[1]}"
                 
         self.worker = AssetDownloadWorker(pack_info, self.local_install_destination, repo_path)
         self.worker.progress_signal.connect(self.progress_bar.setValue)
@@ -640,153 +675,321 @@ class MH2AssetBrowserPanel(QWidget):
         self.worker.start()
 
     def pipeline_element_download_finished(self, success, message):
-        if success:
-            if self.active_batch_processing_queue:
-                completed_key = self.active_batch_processing_queue.pop(0)
-                if completed_key in self.download_cart:
-                    self.download_cart.remove(completed_key)
-                self.sync_cart_label_counters()
-                
-                try:
-                    staged_zip = os.path.normpath(os.path.join(self.local_install_destination, completed_key if completed_key.endswith(".zip") else f"{completed_key}.zip"))
-                    if os.path.exists(staged_zip):
-                        with zipfile.ZipFile(staged_zip, 'r') as archive:
+        if not self.active_batch_processing_queue:
+            return
 
-                            manifest_thumb_name = None
-                            if "packs" in self.manifest_data and completed_key in self.manifest_data["packs"]:
-                                manifest_thumb_url = self.manifest_data["packs"][completed_key].get("thumb", "")
-                                if manifest_thumb_url:
-                                    manifest_thumb_name = os.path.basename(manifest_thumb_url).strip()
+        # Always remove the completed or failed item from the front of the queue
+        completed_key = self.active_batch_processing_queue.pop(0)
+        if completed_key in self.download_cart:
+            self.download_cart.remove(completed_key)
+        self.sync_cart_label_counters()
+
+        if success:
+            try:
+                staged_zip = os.path.normpath(os.path.join(self.local_install_destination, completed_key if completed_key.endswith(".zip") else f"{completed_key}.zip"))
+                if os.path.exists(staged_zip):
+                    with zipfile.ZipFile(staged_zip, 'r') as archive:
+                        manifest_thumb_name = None
+                        if "packs" in self.manifest_data and completed_key in self.manifest_data["packs"]:
+                            manifest_thumb_url = self.manifest_data["packs"][completed_key].get("thumb", "")
+                            if manifest_thumb_url:
+                                manifest_thumb_name = os.path.basename(manifest_thumb_url).strip()
+                        
+                        internal_img = None
+                        if manifest_thumb_name and manifest_thumb_name in archive.namelist():
+                            internal_img = manifest_thumb_name
+                        else:
+                            internal_img = next((f for f in archive.namelist() if f.lower().endswith(('.thumb', '.png', '.jpg', '.jpeg'))), None)
                             
-                            # Fallback pattern matches file tracking explicitly if manifest fields are empty
-                            internal_img = None
-                            if manifest_thumb_name and manifest_thumb_name in archive.namelist():
-                                internal_img = manifest_thumb_name
-                            else:
-                                internal_img = next((f for f in archive.namelist() if f.lower().endswith(('.thumb', '.png', '.jpg', '.jpeg'))), None)
-                                
-                            if internal_img:
-                                render_cache_dir = os.path.normpath(os.path.join(self.mh_glob.env.path_userdata, "downloads", self.mh_glob.env.basename, "render"))
-                                os.makedirs(render_cache_dir, exist_ok=True)
-                                target_thumbnail_dest = os.path.join(render_cache_dir, completed_key + ".thumb")
-                                
-                                with archive.open(internal_img) as source_img, open(target_thumbnail_dest, 'wb') as dest_file:
-                                    dest_file.write(source_img.read())
-                except Exception as img_err:
-                    print(f"[Image Extract Error] {str(img_err)}")
-                    
-                for i in range(self.grid_layout.count()):
-                    w = self.grid_layout.itemAt(i).widget()
-                    if isinstance(w, MH2AssetCard) and w.key == completed_key:
-                        w.refresh_thumbnail_preview()
-                        w.update_card_ui_states()
-                        if self.selected_card == w:
-                            self.highlight_asset(w)
-                        break
-            self.process_next_queue_element()
+                        if internal_img:
+                            render_cache_dir = os.path.normpath(os.path.join(self.mh_glob.env.path_userdata, "downloads", self.mh_glob.env.basename, "render"))
+                            os.makedirs(render_cache_dir, exist_ok=True)
+                            target_thumbnail_dest = os.path.join(render_cache_dir, completed_key + ".thumb")
+                            
+                            with archive.open(internal_img) as source_img, open(target_thumbnail_dest, 'wb') as dest_file:
+                                dest_file.write(source_img.read())
+            except Exception as img_err:
+                print(f"[Image Extract Error] {str(img_err)}")
+                
+            for i in range(self.grid_layout.count()):
+                w = self.grid_layout.itemAt(i).widget()
+                if isinstance(w, MH2AssetCard) and w.key == completed_key:
+                    w.refresh_thumbnail_preview()
+                    w.update_card_ui_states()
+                    if self.selected_card == w:
+                        self.highlight_asset(w)
+                    break
         else:
-            self.progress_bar.setVisible(False)
-            self.btn_download.setEnabled(True)
-            QMessageBox.critical(self, "Pipeline Error", f"Execution halted during staging phase:\n{message}")
+
+            print(f"[Queue Skip Alert] Target package '{completed_key}' failed: {message}")
+            if hasattr(self, 'meta_display') and self.meta_display:
+                self.meta_display.append(f"\n⚠️ [SKIPPED] {completed_key} failed to sync or stage.")
+
+        # Always trigger the next queue item automatically
+        self.process_next_queue_element()
 
     def execute_extraction_pipeline(self):
-        if not self.selected_card:
-            QMessageBox.warning(self, "Error", "Please select a target card to map deployment scopes first.")
+        """Scans the local staging cache and automatically unpacks all downloaded zip packages in a single batch operation."""
+        if not os.path.exists(self.local_install_destination):
+            QMessageBox.warning(self, "Queue Empty", "Staging cache folder not found.\nPlease download packages into your Cart first.")
             return
-            
-        pack_key = str(self.selected_card.key)
-        staged_zip = os.path.normpath(os.path.join(self.local_install_destination, pack_key if pack_key.endswith(".zip") else f"{pack_key}.zip"))
-        
-        if not os.path.exists(staged_zip):
-            QMessageBox.warning(self, "Binary Error", f"Staged bundle archive not found at:\n{staged_zip}\nPlease fire download pipelines first.")
+
+        staged_zips = [f for f in os.listdir(self.local_install_destination) if f.lower().endswith('.zip')]
+
+        if not staged_zips:
+            QMessageBox.information(self, "Nothing to Unpack", "No staging zip packages found.\nPlease run Download workflows first.")
             return
-            
+
         try:
             from core.importfiles import AssetPack
             unzipper = AssetPack()
-            temp_dir, error = unzipper.unZip(staged_zip)
-            if error:
-                raise ValueError(error)
-                
-            mesh_folder = self.mh_glob.env.basename if self.mh_glob.env.basename else "hm08"
-            user_data_path = self.mh_glob.env.path_userdata.replace("\\", "/")
-            temp_dir = temp_dir.replace("\\", "/")
+        except ImportError:
+            QMessageBox.critical(self, "Engine Error", "Failed to interface with MakeHuman 2's core AssetPack module.")
+            return
+
+        mesh_folder = self.mh_glob.env.basename if self.mh_glob.env.basename else "hm08"
+        user_data_path = os.path.normpath(self.mh_glob.env.path_userdata)
+        
+        processed_count = 0
+        failed_count = 0
+
+        for zip_file in staged_zips:
+            staged_zip_path = os.path.normpath(os.path.join(self.local_install_destination, zip_file))
+            pack_key = zip_file
             
-            for root, dirs, files in os.walk(temp_dir):
-                for file in files:
-                    source_file = os.path.join(root, file)
-                    file_lower = file.lower()
-                    root_lower = root.lower()
-                    
-                    # 1. Isolate relative paths inside the archive
-                    rel_zip_route = os.path.relpath(root, temp_dir).replace("\\", "/").lower()
-                    
-                    # 2. Determine target base mesh compatibility 
-                    if "hm08" in file_lower or "hm08" in rel_zip_route:
-                        active_target_mesh = "hm08"
-                    elif "fantasy" in file_lower or "fantasy" in rel_zip_route:
-                        active_target_mesh = "fantasy"
-                    else:
-                        active_target_mesh = mesh_folder
+            try:
+                self.meta_display.setText(f"Batch Processing Extraction: {zip_file}...")
+                temp_dir, error = unzipper.unZip(staged_zip_path)
+                if error:
+                    raise ValueError(error)
 
-                    # 3. Cleanly isolate the core filename text without extensions
-                    split_tuple = os.path.splitext(file)
-                    base_item_name = split_tuple[0]
-                    if "." in base_item_name:
-                        base_item_name = base_item_name.split('.')[0]
+                temp_dir = temp_dir.replace("\\", "/")
 
-                    # 4. PROTOCOL DEPLOYMENT ROUTING MATRIX
-                    if file_lower.endswith(('.target', '.npz')) or "target" in rel_zip_route:
-                        sub_route = f"target/{active_target_mesh}"
-                        
-                    elif file_lower.endswith(('.mhclo', '.obj', '.mhmat', '.mat', '.png', '.jpg', '.jpeg', '.thumb')):
-                        
-                        # --- EYES ROUTING PROTOCOL-needs work ---
-                        if "eyes" in rel_zip_route or "eyes" in file_lower:
-                            # Keep .thumb preview files loose with descriptors; send raw image maps to master materials/ folder
-                            if file_lower.endswith(('.png', '.jpg', '.jpeg')) and not file_lower.endswith('.thumb'):
-                                sub_route = f"eyes/{active_target_mesh}/materials"
-                            else:
-                                sub_route = f"eyes/{active_target_mesh}"
 
-                        # --- SKINS ROUTING PROTOCOL-needs work ---
-                        elif "skin" in rel_zip_route or "skin" in file_lower or ("material" in root_lower and not any(k in file_lower for k in ["hair", "eyebrow"])):
+                pack_type = ""
+                for i in range(self.grid_layout.count()):
+                    w = self.grid_layout.itemAt(i).widget()
+                    if isinstance(w, MH2AssetCard) and w.key == zip_file:
+                        pack_type = str(w.data.get("type", "")).lower().strip()
+                        break
 
-                            if file_lower.endswith(('.png', '.jpg', '.jpeg')) and not file_lower.endswith('.thumb'):
-                                sub_route = f"skins/{active_target_mesh}/materials"
-                            else:
-                                sub_route = f"skins/{active_target_mesh}"
+                for root, dirs, files in os.walk(temp_dir):
+                    for file in files:
+                        source_file = os.path.join(root, file)
+                        file_lower = file.lower()
+                        root_lower = root.lower()
 
-                        # --- STANDARD ACCESSORY AND CLOTHING SEPARATE TRACKS ---
-                        elif "eyebrow" in rel_zip_route or "eyebrow" in file_lower:
-                            sub_route = f"eyebrows/{active_target_mesh}/{base_item_name}"
-                        elif "eyelash" in rel_zip_route or "eyelash" in file_lower:
-                            sub_route = f"eyelashes/{active_target_mesh}/{base_item_name}"
-                        elif "hair" in rel_zip_route or "hair" in file_lower:
-                            sub_route = f"hair/{active_target_mesh}/{base_item_name}"
-                        elif "teeth" in rel_zip_route or "teeth" in file_lower:
-                            sub_route = f"teeth/{active_target_mesh}/{base_item_name}"
-                        elif "tongue" in rel_zip_route or "tongue" in file_lower:
-                            sub_route = f"tongue/{active_target_mesh}/{base_item_name}"
-                        elif "prop" in rel_zip_route or "weapon" in file_lower or "sword" in file_lower or "shield" in file_lower:
-                            sub_route = f"props/{base_item_name}"
+                        rel_zip_route = os.path.relpath(root, temp_dir).replace("\\", "/").lower()
+
+                        if "hm08" in file_lower or "hm08" in rel_zip_route:
+                            active_target_mesh = "hm08"
+                        elif "fantasy" in file_lower or "fantasy" in rel_zip_route:
+                            active_target_mesh = "fantasy"
                         else:
-                            pack_folder_name = os.path.basename(staged_zip)[:-4].replace("hm08-", "")
-                            sub_route = f"clothes/{active_target_mesh}/{pack_folder_name}"
-                    else:
-                        sub_route = os.path.relpath(root, temp_dir).replace("\\", "/").replace("data/", "")
-                        
-                    final_destination = os.path.join(user_data_path, sub_route, file).replace("\\", "/")
-                    os.makedirs(os.path.dirname(final_destination), exist_ok=True)
-                    shutil.copy2(source_file, final_destination)
-                    
-            unzipper.cleanupUnzip()
-            self.mh_glob.MainWindow.syncRepositories()
-            self.meta_display.setText("Extraction complete! Skins and Eyes isolated with correct mesh folder mapping.")
-            QMessageBox.information(self, "Success", f"'{pack_key}' unpacked using exact category layout rules!")
-        except Exception as err:
-            QMessageBox.critical(self, "Deployment Error", str(err))
+                            active_target_mesh = mesh_folder
 
+                        # Clean item name extraction
+                        split_tuple = os.path.splitext(file)
+                        base_item_name = split_tuple[0]
+
+                        # --- OFFICIAL PROTOCOL DEPLOYMENT ROUTING MATRIX ---
+                        if file_lower.endswith(('.target', '.npz')) or "target" in rel_zip_route:
+                            sub_route = os.path.join("target", active_target_mesh)
+                            
+                        elif file_lower.endswith(('.mhclo', '.obj', '.mhmat', '.mat', '.png', '.jpg', '.jpeg', '.thumb', '.json', '.mhp', '.bvh', '.mhs')):
+                            
+                            # --- 1. STRICT ISOLATED ACCESSORY CHANNELS FIRST (PREVENTS HIJACKING) ---
+                            if "eyebrow" in rel_zip_route or "eyebrow" in file_lower:
+                                sub_route = os.path.join("eyebrows", active_target_mesh, base_item_name)
+                            elif "eyelash" in rel_zip_route or "eyelash" in file_lower:
+                                sub_route = os.path.join("eyelashes", active_target_mesh, base_item_name)
+                            elif "teeth" in rel_zip_route or "teeth" in file_lower:
+                                sub_route = os.path.join("teeth", active_target_mesh, base_item_name)
+                            elif "tongue" in rel_zip_route or "tongue" in file_lower:
+                                sub_route = os.path.join("tongue", active_target_mesh, base_item_name)
+
+                            # --- 2. COMPLEX HAIR FAMILY RECOLOR POOLING TRACKS ---
+                            elif "hair" in rel_zip_route or "hair" in file_lower:
+                                parent_dir_name = os.path.basename(root).strip().lower()
+                                pack_folder_name = pack_key[:-4].replace("hm08-", "")
+                                
+                                explicit_hair_mesh = None
+                                try:
+                                    local_files = os.listdir(root)
+                                    for f in local_files:
+                                        if f.lower().endswith('.mhclo'):
+                                            explicit_hair_mesh = os.path.splitext(f)[0]
+                                            break
+                                except Exception:
+                                    pass
+
+                                if explicit_hair_mesh:
+                                    hair_family_folder = explicit_hair_mesh
+                                elif parent_dir_name and parent_dir_name not in ["", "data", "resource", "temp", pack_folder_name.lower(), os.path.basename(temp_dir).lower(), "materials", "textures"]:
+                                    hair_family_folder = os.path.basename(root)
+                                else:
+                                    clean_prefix = base_item_name.lower()
+                                    if "_diffuse" in clean_prefix:
+                                        clean_prefix = clean_prefix.split("_diffuse")[0]
+                                    if "_material" in clean_prefix:
+                                        clean_prefix = clean_prefix.split("_material")[0]
+                                    for trait in ["_red", "_green", "_blue", "_blonde", "_black", "_brown", "_pink", "_purple", "_grey", "_white", "_recolor", "_pk", "_pack"]:
+                                        if trait in clean_prefix:
+                                            clean_prefix = clean_prefix.split(trait)[0]
+                                            break
+                                    hair_family_folder = clean_prefix
+
+                                sub_route = os.path.join("hair", active_target_mesh, hair_family_folder)
+
+                            # --- 3. HARD NAME UNIFIED KIT OVERRIDES (AVA & BIONICS etc) ---
+                            else:
+                                pack_folder_name = pack_key[:-4].replace("hm08-", "")
+                                is_unified_kit = any(k in pack_folder_name.lower() or k in file_lower or k in rel_zip_route for k in ["ww_kit", "woman", "maid", "croft", "lara", "vader", "killer", "zombie", "bionic", "ava", "machina"])
+                                
+                                local_files = os.listdir(root) if os.path.exists(root) else []
+                                has_clothing_sibling = any(f.lower().endswith('.mhclo') for f in local_files)
+
+                                if is_unified_kit:
+                                    if file_lower.endswith('.proxy'):
+                                        sub_route = os.path.join("proxy", active_target_mesh, pack_folder_name)
+                                    elif file_lower.endswith(('.png', '.jpg', '.jpeg', '.mhmat', '.mat')) and "proxy" in rel_zip_route:
+                                        if file_lower.endswith(('.png', '.jpg', '.jpeg')) and not file_lower.endswith('.thumb'):
+                                            sub_route = os.path.join("proxy", active_target_mesh, pack_folder_name, "materials")
+                                        else:
+                                            sub_route = os.path.join("proxy", active_target_mesh, pack_folder_name)
+                                    else:
+                                        sub_route = os.path.join("clothes", active_target_mesh, pack_folder_name)
+
+                                # --- 4. EXTENSION ENFORCED CLOTHING MATRIX ---
+                                elif file_lower.endswith('.mhclo') or (has_clothing_sibling and file_lower.endswith(('.obj', '.mhmat', '.mat', '.png', '.jpg', '.jpeg'))):
+                                    parent_dir_name = os.path.basename(root).strip().lower()
+                                    if parent_dir_name and parent_dir_name not in ["", "data", "resource", "temp", pack_folder_name.lower(), os.path.basename(temp_dir).lower()]:
+                                        sub_route = os.path.join("clothes", active_target_mesh, os.path.basename(root))
+                                    else:
+                                        sub_route = os.path.join("clothes", active_target_mesh, base_item_name)
+
+                                # --- 5. SHADER VIEWPORT SKYBOX & ENVIRONMENTS ---
+                                elif "skybox" in pack_type or "skybox" in rel_zip_route or "skybox" in file_lower:
+                                    parent_dir_name = os.path.basename(root).strip().lower()
+                                    if not parent_dir_name or parent_dir_name in ["", "data", "resource", "materials", "temp", os.path.basename(temp_dir).lower()]:
+                                        unique_skybox_folder = pack_key[:-4].replace("common-", "")
+                                    else:
+                                        unique_skybox_folder = os.path.basename(root)
+                                    sub_route = os.path.join("shaders", "skybox", unique_skybox_folder)
+
+                                elif "floor" in pack_type or "floor" in rel_zip_route or "floor" in file_lower:
+                                    parent_dir_name = os.path.basename(root).strip().lower()
+                                    if not parent_dir_name or parent_dir_name in ["", "data", "resource", "temp", os.path.basename(temp_dir).lower()]:
+                                        unique_floor_folder = pack_key[:-4].replace("common-", "")
+                                    else:
+                                        unique_floor_folder = os.path.basename(root)
+                                    sub_route = os.path.join("shaders", "floor", unique_floor_folder)
+
+                                elif "themes" in rel_zip_route or (file_lower.endswith('.json') and "theme" in rel_zip_route):
+                                    sub_route = "themes"
+
+                                # --- 6. RIGS & ANIMATION MATRIX STACK ---
+                                elif "mhskel" in rel_zip_route or "rig" in rel_zip_route or file_lower.endswith('.mhskel'):
+                                    sub_route = "rigs"
+                                elif "poses" in rel_zip_route or file_lower.endswith('.mhp'):
+                                    sub_route = "poses"
+                                elif "expressions" in rel_zip_route or file_lower.endswith('.mhs'):
+                                    sub_route = "expressions"
+                                elif "animations" in rel_zip_route or file_lower.endswith('.bvh'):
+                                    sub_route = "animations"
+
+                                # --- 7. PROPS & GENERAL PROXIES ---
+                                elif "props" in rel_zip_route:
+                                    sub_route = os.path.join("props", base_item_name)
+                                elif "proxy" in rel_zip_route or "proxy" in pack_type:
+                                    if file_lower.endswith(('.png', '.jpg', '.jpeg', '.mhmat', '.mat')):
+                                        if file_lower.endswith(('.png', '.jpg', '.jpeg')) and not file_lower.endswith('.thumb'):
+                                            sub_route = os.path.join("proxy", active_target_mesh, base_item_name, "materials")
+                                        else:
+                                            sub_route = os.path.join("proxy", active_target_mesh, base_item_name)
+                                    else:
+                                        sub_route = os.path.join("proxy", active_target_mesh, base_item_name)
+
+                                # --- 8. PROTOCOL ACCURATE POOLED EYES MATRIX eyes still need work---
+                                elif "eyes" in rel_zip_route or "eyes" in file_lower:
+                                    if file_lower.endswith(('.png', '.jpg', '.jpeg')) and not file_lower.endswith('.thumb'):
+                                    
+                                        sub_route = os.path.join("eyes", active_target_mesh, "materials")
+                                    else:
+                                        sub_route = os.path.join("eyes", active_target_mesh)
+
+                                # --- 9. PROTOCOL ACCURATE POOLED SKINS MATRIX ---
+                                elif "skin" in rel_zip_route or "skin" in file_lower or ("material" in root_lower and not any(k in file_lower for k in ["hair", "eyebrow"])):
+                                    if file_lower.endswith(('.png', '.jpg', '.jpeg')) and not file_lower.endswith('.thumb'):
+                                        sub_route = os.path.join("skins", active_target_mesh, "materials")
+                                    else:
+                                        sub_route = os.path.join("skins", active_target_mesh)
+
+                                # --- 10. GENERAL BULK CLOTHING OVERLAY FALLBACKS ---
+                                else:
+                                    parent_dir_name = os.path.basename(root).strip().lower()
+                                    if parent_dir_name and parent_dir_name not in ["", "data", "resource", "temp", pack_folder_name.lower(), os.path.basename(temp_dir).lower()]:
+                                        sub_route = os.path.join("clothes", active_target_mesh, os.path.basename(root))
+                                    else:
+                                        sub_route = os.path.join("clothes", active_target_mesh, base_item_name)
+                        else:
+                            sub_route = os.path.normpath(os.path.join(os.path.relpath(root, temp_dir))).replace("data/", "")
+
+                        # Deploy and recycle compiled binary interferences to prevent corruption
+                        final_destination = os.path.join(user_data_path, sub_route, file).replace("\\", "/")
+                        os.makedirs(os.path.dirname(final_destination), exist_ok=True)
+
+                        potential_mhbin = final_destination + "bin"
+                        if os.path.exists(potential_mhbin):
+                            try:
+                                os.remove(potential_mhbin)
+                            except Exception:
+                                pass
+
+                        shutil.copy2(source_file, final_destination)
+
+                unzipper.cleanupUnzip()
+                processed_count += 1
+            except Exception as e:
+                print(f"[Batch Extract Failed] Missing or broken elements in {zip_file}: {str(e)}")
+                failed_count += 1
+                continue
+
+        self.mh_glob.MainWindow.syncRepositories()
+
+        completion_msg = f"Batch extraction complete!\nSuccessfully Unpacked: {processed_count} packages."
+        if failed_count > 0:
+            completion_msg += f"\nSkipped Errors: {failed_count} packages."
+
+        self.meta_display.setText(completion_msg)
+        QMessageBox.information(self, "Batch Process Finished", completion_msg)
+
+    def execute_repo_bulk_download(self):
+        """Scans the active layout grid and builds a downloading task queue for every single visible pack."""
+        visible_keys = []
+        for i in range(self.grid_layout.count()):
+            card = self.grid_layout.itemAt(i).widget()
+            if isinstance(card, MH2AssetCard) and not card.isHidden():
+                visible_keys.append(card.key)
+                
+        if not visible_keys:
+            QMessageBox.information(self, "No Packs Found", "There are no visible asset packs to download in this repository view right now.")
+            return
+            
+        confirm = QMessageBox.question(
+            self, 
+            "Confirm Bulk Download", 
+            f"Are you sure you want to download ALL {len(visible_keys)} visible packs in this repository view back-to-back?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if confirm == QMessageBox.Yes:
+            # Force the processing queue to populate with every single visible card key in the repo panel
+            self.active_batch_processing_queue = list(visible_keys)
+            self.btn_download.setEnabled(False)
+            self.progress_bar.setValue(0)
+            self.progress_bar.setVisible(True)
+            self.process_next_queue_element()
 
 
     def execute_cleanup_pipeline(self):
