@@ -1,5 +1,5 @@
 """
-MakeHuman 2 Community Archive Downloader V4.4 - Elvaerwyn_MH2 2026
+MakeHuman 2 Community Archive Downloader V4.5 - Elvaerwyn_MH2 2026
 Completely Independent Visual Content Browser, Search Engine, Cart & Favorites Matrix
 """
 
@@ -889,7 +889,7 @@ class MH2AssetBrowserPanel(QWidget):
                                 elif "eyes" in rel_zip_route or "eyes" in file_lower:
                                     sub_route = os.path.join("eyes", active_target_mesh, "materials") if (ext in ['.png', '.jpg', '.jpeg'] and not file_lower.endswith('.thumb')) else os.path.join("eyes", active_target_mesh)
 
-                                elif "skin" in rel_zip_route or "skin" in file_lower or ("material" in root_lower and not any(k in file_lower or k in ["hair", "eyebrow", "eye", "teeth", "tongue"])):
+                                elif "skin" in rel_zip_route or "skin" in file_lower or ("material" in root_lower and not any(k in file_lower for k in ["hair", "eyebrow", "eye", "teeth", "tongue"])):
                                     sub_route = os.path.join("skins", active_target_mesh, "materials") if (ext in ['.png', '.jpg', '.jpeg'] and not file_lower.endswith('.thumb')) else os.path.join("skins", active_target_mesh)
 
                                 else:
