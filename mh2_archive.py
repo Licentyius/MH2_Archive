@@ -1,5 +1,5 @@
 """
-MakeHuman 2 Community Archive Downloader V4.5 - Elvaerwyn_MH2 2026
+MakeHuman 2 Community Archive Downloader V4.7 - Elvaerwyn_MH2 2026
 Completely Independent Visual Content Browser, Search Engine, Cart & Favorites Matrix
 """
 
@@ -14,9 +14,8 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit,
     QLabel, QTextEdit, QProgressBar, QScrollArea, QGridLayout, 
     QFrame, QComboBox, QApplication, QMessageBox, QGroupBox, 
-    QStyle, QDockWidget, QTabWidget
+    QStyle, QDockWidget, QTabWidget, QCheckBox
 )
-
 
 # ===========================================
 # SECTION 1: THE BACKGROUND DOWNLOAD WORKER
@@ -282,7 +281,14 @@ class MH2AssetBrowserPanel(QWidget):
         self.btn_refresh.setToolTip("Force reload the current remote repository asset manifest catalog")
         self.btn_refresh.clicked.connect(self.fetch_remote_manifest)
         repo_row.addWidget(self.btn_refresh)
+
+        self.chk_dev_mode = QCheckBox("🛠️ Dev Mode")
+        self.chk_dev_mode.setToolTip("Unlock legacy-* asset packs for testing and development")
+        self.chk_dev_mode.toggled.connect(self.on_dev_mode_toggled)
+        repo_row.addWidget(self.chk_dev_mode)
+
         layout.addLayout(repo_row)
+
         ribbon = QHBoxLayout()
         self.btn_view_all = QPushButton("🗂️ All Packs")
         self.btn_view_all.setCheckable(True)
@@ -382,6 +388,7 @@ class MH2AssetBrowserPanel(QWidget):
         layout.addWidget(ops_group)
 
         self.fetch_remote_manifest()
+
     def async_pull_thumbnail(self, url, dest_path, card_widget):
         class QuickThumbWorker(QThread):
             done = Signal(bool)
@@ -451,16 +458,17 @@ class MH2AssetBrowserPanel(QWidget):
                 item.widget().deleteLater()
 
         if self.mh_glob.baseClass is None:
-            allowprefix = ["common"]
+            allowprefix = ["common", "legacy"]
             parentmesh = None
         else:
             parentmesh = self.mh_glob.baseClass.baseInfo.get("parentmesh")
-            allowprefix = ["common", self.mh_glob.env.basename]
+            allowprefix = ["common", "legacy", self.mh_glob.env.basename]
             if self.mh_glob.env.basename == "fantasy":
-                allowprefix.append("hm08")
+                allowprefix.extend(["hm08", "common", "legacy"])
                 
         if parentmesh:
             allowprefix.append(parentmesh)
+
                 
         active_repo = self.repo_dropdown.currentText()
         repo_path = self.repositories.get(active_repo, "Makehuman-2/MH2_Asset_Repository_CC-By").strip()
@@ -489,7 +497,8 @@ class MH2AssetBrowserPanel(QWidget):
                         continue
  
                     parts = pack_key.split("-")
-                    if parts[0] not in allowprefix:
+                    pack_prefixes = [p.strip() for p in parts[0].split(",")]
+                    if not any(p in allowprefix for p in pack_prefixes):
                         continue
                         
                     card = MH2AssetCard(pack_key, pack_info, "PACK_MODE", self)
@@ -513,25 +522,80 @@ class MH2AssetBrowserPanel(QWidget):
         self.sync_cart_label_counters()
         QApplication.restoreOverrideCursor()
 
+    def on_dev_mode_toggled(self, checked):
+        if not checked:
+            # Automatically remove any legacy-* packs from the cart if Dev Mode is turned off
+            self.download_cart = [k for k in self.download_cart if not str(k).lower().startswith("legacy-")]
+            self.sync_cart_label_counters()
+        self.filter_browser_grid()
+
     def filter_browser_grid(self):
         query = self.search_bar.text().lower().strip()
+        dev_mode = hasattr(self, 'chk_dev_mode') and self.chk_dev_mode.isChecked()
+
         for i in range(self.grid_layout.count()):
             card = self.grid_layout.itemAt(i).widget()
             if isinstance(card, MH2AssetCard):
-                title = str(card.data.get("title", card.key)).lower()
-                descr = str(card.data.get("descr", "")).lower()
-                
+                # Hide legacy-* packs unless Dev Mode is enabled
+                if str(card.key).lower().startswith("legacy-") and not dev_mode:
+                    card.hide()
+                    continue
+
+                title = str(card.data.get("title", card.data.get("name", card.key))).lower()
+                descr = str(card.data.get("descr", card.data.get("description", ""))).lower()
+
                 if self.current_view_mode == "FAVORITES" and card.key not in self.favorites_db["assets"]:
                     card.hide()
                     continue
                 if self.current_view_mode == "CART" and card.key not in self.download_cart:
                     card.hide()
                     continue
-                    
+
                 if query and (query not in title and query not in descr):
                     card.hide()
                 else:
                     card.show()
+
+        self.relayout_browser_grid()
+
+
+    def relayout_browser_grid(self):
+        """Reflows visible asset cards dynamically to fit the current viewport width."""
+        if not hasattr(self, 'grid_scroll') or not hasattr(self, 'grid_layout'):
+            return
+
+        viewport_w = self.grid_scroll.viewport().width()
+        card_w = 145
+        spacing = self.grid_layout.spacing()
+        margins = self.grid_layout.contentsMargins()
+        usable_w = max(viewport_w - margins.left() - margins.right(), card_w)
+
+        columns_limit = max(1, (usable_w + spacing) // (card_w + spacing))
+
+        # Collect all card widgets currently in the layout
+        cards = []
+        while self.grid_layout.count():
+            item = self.grid_layout.takeAt(0)
+            w = item.widget()
+            if isinstance(w, MH2AssetCard):
+                cards.append(w)
+
+        # Re-insert only visible cards cleanly left-to-right across available columns
+        row, col = 0, 0
+        for card in cards:
+            if card.isHidden():
+                self.grid_layout.addWidget(card, 0, 0)
+                continue
+            self.grid_layout.addWidget(card, row, col)
+            col += 1
+            if col >= columns_limit:
+                col = 0
+                row += 1
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.relayout_browser_grid()
+
 
     def highlight_asset(self, asset_card):
         self.selected_card = asset_card
@@ -632,14 +696,22 @@ class MH2AssetBrowserPanel(QWidget):
             self.btn_download.setText(f"📥 Download Highlighted: {asset_card.key}")
             
         self.btn_download.setEnabled(True)
+
     def execute_download_pipeline(self):
+        dev_mode = hasattr(self, 'chk_dev_mode') and self.chk_dev_mode.isChecked()
+
         if not self.download_cart and self.selected_card:
-            self.active_batch_processing_queue = [self.selected_card.key]
+            queue = [self.selected_card.key]
         else:
-            self.active_batch_processing_queue = list(self.download_cart)
-            
+            queue = list(self.download_cart)
+
+        if not dev_mode:
+            queue = [k for k in queue if not str(k).lower().startswith("legacy-")]
+
+        self.active_batch_processing_queue = queue
+
         if not self.active_batch_processing_queue:
-            QMessageBox.information(self, "No Item Selected", "Please select an asset card or add items to your Cart to initiate download workflows.")
+            QMessageBox.information(self, "No Item Selected", "Please select an available asset card or enable Dev Mode for legacy packs.")
             return
             
         self.btn_download.setEnabled(False)
@@ -733,14 +805,17 @@ class MH2AssetBrowserPanel(QWidget):
         self.process_next_queue_element()
 
     def execute_extraction_pipeline(self):
-        """Scans the local staging cache and automatically unpacks all downloaded zip packages in a single batch operation."""
+        """Unpacks staged zip packages and Creator Portal asset folders using manifest metadata."""
         if not os.path.exists(self.local_install_destination):
-            QMessageBox.warning(self, "Queue Empty", "Staging cache folder not found.\nPlease download packages into your Cart first.")
+            QMessageBox.warning(self, "Queue Empty", "Staging cache folder not found.\nPlease download packages first.")
             return
 
-        staged_zips = [f for f in os.listdir(self.local_install_destination) if f.lower().endswith('.zip')]
-        if not staged_zips:
-            QMessageBox.information(self, "Nothing to Unpack", "No staging zip packages found.\nPlease run Download workflows first.")
+        staged_entries = os.listdir(self.local_install_destination)
+        staged_zips = [f for f in staged_entries if f.lower().endswith('.zip')]
+        staged_dirs = [f for f in staged_entries if os.path.isdir(os.path.join(self.local_install_destination, f))]
+
+        if not staged_zips and not staged_dirs:
+            QMessageBox.information(self, "Nothing to Unpack", "No staged zip packages or asset folders found.")
             return
 
         try:
@@ -750,179 +825,252 @@ class MH2AssetBrowserPanel(QWidget):
             QMessageBox.critical(self, "Engine Error", "Failed to interface with MakeHuman 2's core AssetPack module.")
             return
 
-        mesh_folder = self.mh_glob.env.basename if self.mh_glob.env.basename else "hm08"
+        default_mesh = self.mh_glob.env.basename if self.mh_glob.env.basename else "hm08"
         user_data_path = os.path.normpath(self.mh_glob.env.path_userdata)
-        
+
+        type_map = {
+            "clothes": "clothes", "clothing": "clothes",
+            "hair": "hair",
+            "eyebrows": "eyebrows", "eyebrow": "eyebrows",
+            "eyelashes": "eyelashes", "eyelash": "eyelashes",
+            "teeth": "teeth",
+            "tongue": "tongue",
+            "eyes": "eyes", "eye": "eyes",
+            "skin": "skins", "skins": "skins",
+            "target": "target", "targets": "target",
+            "proxy": "proxy", "proxymeshes": "proxy",
+            "pose": "poses", "poses": "poses",
+            "expression": "expressions", "expressions": "expressions",
+            "animation": "animations", "animations": "animations",
+            "rig": "rigs", "rigs": "rigs",
+            "prop": "props", "props": "props",
+            "model": "models", "models": "models",
+            "skybox": "skybox",
+            "floor": "floor"
+        }
+
+        def normalize_types(raw_type):
+            if isinstance(raw_type, list):
+                items = [str(t).strip().lower() for t in raw_type]
+            elif isinstance(raw_type, str) and raw_type.strip():
+                items = [t.strip().lower() for t in raw_type.split(",")]
+            else:
+                items = []
+            return [type_map.get(t, t) for t in items if t]
+
+        def copy_and_sanitize_file(src, dst):
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            if os.path.exists(dst + "bin"):
+                try:
+                    os.remove(dst + "bin")
+                except Exception:
+                    pass
+            if dst.lower().endswith(".mhmat"):
+                with open(src, "r", encoding="utf-8", errors="ignore") as f_in:
+                    lines = f_in.readlines()
+                cleaned = []
+                for line in lines:
+                    if any(line.startswith(k) for k in ["ambientColor", "diffuseColor", "specularColor", "emissiveColor", "colorationColor", "glassColor"]):
+                        line = " ".join(p.rstrip(",") for p in line.split()) + "\n"
+                    cleaned.append(line)
+                with open(dst, "w", encoding="utf-8") as f_out:
+                    f_out.writelines(cleaned)
+            else:
+                shutil.copy2(src, dst)
+        def classify_directory_for_multitype(dir_path, rel_lower, files_in_dir, allowed):
+            exts = {os.path.splitext(f)[1].lower() for f in files_in_dir}
+
+            # 1. Explicit subfolder match first
+            for candidate in allowed:
+                if candidate in rel_lower.split("/") or candidate in rel_lower:
+                    return candidate
+
+            # 2. Extension-based detection
+            if (".target" in exts or ".npz" in exts) and "target" in allowed:
+                return "target"
+            if ".proxy" in exts and "proxy" in allowed:
+                return "proxy"
+            if (".mhp" in exts or ".mhpose" in exts):
+                if "expressions" in allowed and "poses" not in allowed:
+                    return "expressions"
+                if "expressions" in allowed and ("expression" in rel_lower or "face" in rel_lower):
+                    return "expressions"
+                if "poses" in allowed:
+                    return "poses"
+
+            if ".bvh" in exts and "animations" in allowed:
+                return "animations"
+            if ".mhskel" in exts and "rigs" in allowed:
+                return "rigs"
+
+            # 3. Material-only folder (no .mhclo or .obj) -> skins
+            if "skins" in allowed and ".mhclo" not in exts and ".obj" not in exts and ".mhmat" in exts:
+                return "skins"
+
+            # 4. Inspect .mhclo tags/names when both clothes and hair are allowed
+            if "hair" in allowed and "clothes" in allowed and ".mhclo" in exts:
+                for fname in files_in_dir:
+                    if fname.lower().endswith(".mhclo"):
+                        mhclo_path = os.path.join(dir_path, fname)
+                        try:
+                            with open(mhclo_path, "r", encoding="utf-8", errors="ignore") as f:
+                                header = f.read(1024).lower()
+                            if "hair" in fname.lower() or "tag hair" in header or "wig" in header:
+                                return "hair"
+                        except Exception:
+                            pass
+                return "clothes"
+
+            return allowed[0] if allowed else "clothes"
+
         processed_count = 0
         failed_count = 0
 
+        # 1. Process ZIP archives (Pack Mode) using community_packs.json metadata
         for zip_file in staged_zips:
             staged_zip_path = os.path.normpath(os.path.join(self.local_install_destination, zip_file))
-            pack_key = zip_file
-            
+            pack_info = self.manifest_data.get("packs", {}).get(zip_file, {})
+            allowed_types = normalize_types(pack_info.get("type", ""))
+            manifest_base = str(pack_info.get("base", "")).strip().lower()
+
             try:
-                self.meta_display.setText(f"Batch Processing Extraction: {zip_file}...")
+                self.meta_display.setText(f"Unpacking: {zip_file}...")
                 temp_dir, error = unzipper.unZip(staged_zip_path)
                 if error:
                     raise ValueError(error)
 
-                temp_dir = temp_dir.replace("\\", "/")
-
-                pack_type = ""
-                for i in range(self.grid_layout.count()):
-                    w = self.grid_layout.itemAt(i).widget()
-                    if isinstance(w, MH2AssetCard) and w.key == zip_file:
-                        pack_type = str(w.data.get("type", "")).lower().strip()
-                        break
-
                 for root, dirs, files in os.walk(temp_dir):
-                    for file in files:
-                        source_file = os.path.join(root, file)
-                        file_lower = file.lower()
-                        root_lower = root.lower()
-                        rel_zip_route = os.path.relpath(root, temp_dir).replace("\\", "/").lower()
+                    if not files:
+                        continue
 
-                        if "hm08" in file_lower or "hm08" in rel_zip_route:
-                            active_target_mesh = "hm08"
-                        elif "fantasy" in file_lower or "fantasy" in rel_zip_route:
-                            active_target_mesh = "fantasy"
-                        else:
-                            active_target_mesh = mesh_folder
+                    rel_path = os.path.relpath(root, temp_dir).replace("\\", "/")
+                    rel_parts = [p for p in rel_path.split("/") if p and p != "."]
+                    rel_lower = rel_path.lower()
+                    exts_in_dir = {os.path.splitext(f)[1].lower() for f in files}
 
-                        base_item_name, ext = os.path.splitext(file)
-                        ext = ext.lower()
+                    # Respect "base" from community_packs.json first, then path hints
+                    if manifest_base in ["hm08", "fantasy"]:
+                        active_mesh = manifest_base
+                    elif "fantasy" in rel_lower or "fantasy" in zip_file.lower():
+                        active_mesh = "fantasy"
+                    else:
+                        active_mesh = default_mesh
 
-                        # --- OFFICIAL ROUTING MATRIX ---
-                        if ext in ['.target', '.npz'] or "target" in rel_zip_route:
-                            sub_route = os.path.join("target", active_target_mesh)
-                            
-                        elif ext in ['.mhclo', '.obj', '.mhmat', '.mat', '.png', '.jpg', '.jpeg', '.thumb', '.json', '.mhp', '.bvh', '.mhs', '.mhskel']:
-                            
-                            if "eyebrow" in rel_zip_route or "eyebrow" in file_lower:
-                                sub_route = os.path.join("eyebrows", active_target_mesh, base_item_name)
-                            elif "eyelash" in rel_zip_route or "eyelash" in file_lower:
-                                sub_route = os.path.join("eyelashes", active_target_mesh, base_item_name)
-                            elif "teeth" in rel_zip_route or "teeth" in file_lower:
-                                sub_route = os.path.join("teeth", active_target_mesh, base_item_name)
-                            elif "tongue" in rel_zip_route or "tongue" in file_lower:
-                                sub_route = os.path.join("tongue", active_target_mesh, base_item_name)
+                    # Respect "type" from community_packs.json
+                    if len(allowed_types) == 1:
+                        category = allowed_types[0]
+                    else:
+                        candidates = allowed_types if allowed_types else list(type_map.values())
+                        category = classify_directory_for_multitype(root, rel_lower, files, candidates)
 
-                            elif "hair" in rel_zip_route or "hair" in file_lower:
-                                parent_dir_name = os.path.basename(root).strip().lower()
-                                pack_folder_name = pack_key[:-4].replace("hm08-", "")
-                                explicit_hair_mesh = next((os.path.splitext(f)[0] for f in os.listdir(root) if f.lower().endswith('.mhclo')), None) if os.path.exists(root) else None
-                                if explicit_hair_mesh:
-                                    hair_family_folder = explicit_hair_mesh
-                                elif parent_dir_name and parent_dir_name not in ["", "data", "resource", "temp", pack_folder_name.lower(), os.path.basename(temp_dir).lower(), "materials", "textures"]:
-                                    hair_family_folder = os.path.basename(root)
+                        if not category:
+                            if ".target" in exts_in_dir or ".npz" in exts_in_dir:
+                                category = "target"
+                            elif ".proxy" in exts_in_dir:
+                                category = "proxy"
+                            elif ".mhp" in exts_in_dir or ".mhpose" in exts_in_dir:
+                                if "expression" in zip_file.lower() or "expression" in rel_lower:
+                                    category = "expressions"
                                 else:
-                                    clean_prefix = base_item_name.lower()
-                                    if "_diffuse" in clean_prefix:
-                                        clean_prefix = clean_prefix.split("_diffuse")[0]
-                                    if "_material" in clean_prefix:
-                                        clean_prefix = clean_prefix.split("_material")[0]
-                                    for trait in ["_red", "_green", "_blue", "_blonde", "_black", "_brown", "_pink", "_purple", "_grey", "_white", "_recolor", "_pk", "_pack"]:
-                                        if trait in clean_prefix:
-                                            clean_prefix = clean_prefix.split(trait)[0]
-                                            break
-                                    hair_family_folder = clean_prefix
-                                sub_route = os.path.join("hair", active_target_mesh, hair_family_folder)
-
+                                    category = "poses"
+                            elif ".mhs" in exts_in_dir:
+                                category = "expressions"
+                            elif ".bvh" in exts_in_dir:
+                                category = "animations"
+                            elif ".mhskel" in exts_in_dir:
+                                category = "rigs"
                             else:
-                                pack_folder_name = pack_key[:-4].replace("hm08-", "")
-                                is_unified_kit = any(k in pack_folder_name.lower() or k in file_lower or k in rel_zip_route for k in ["ww_kit", "woman", "maid", "croft", "lara", "vader", "killer", "zombie", "bionic", "ava", "machina"])
-                                local_files = os.listdir(root) if os.path.exists(root) else []
-                                has_clothing_sibling = any(f.lower().endswith('.mhclo') for f in local_files)
+                                category = allowed_types if allowed_types else "clothes"
 
-                                if is_unified_kit:
-                                    if ext == '.proxy':
-                                        sub_route = os.path.join("proxy", active_target_mesh, pack_folder_name)
-                                    elif ext in ['.png', '.jpg', '.jpeg', '.mhmat', '.mat'] and "proxy" in rel_zip_route:
-                                        if ext in ['.png', '.jpg', '.jpeg'] and not file_lower.endswith('.thumb'):
-                                            sub_route = os.path.join("proxy", active_target_mesh, pack_folder_name, "materials")
-                                        else:
-                                            sub_route = os.path.join("proxy", active_target_mesh, pack_folder_name)
-                                    else:
-                                        sub_route = os.path.join("clothes", active_target_mesh, pack_folder_name)
+                    # Determine the asset's own folder name so textures stay with their .mhclo or .proxy
+                    mesh_descriptor_files = [
+                        os.path.splitext(f)[0] for f in files
+                        if f.lower().endswith((".mhclo", ".proxy"))
+                    ]
+                    skip_names = {
+                        "data", "clothes", "hair", "eyes", "eyebrows", "eyelashes",
+                        "teeth", "tongue", "skins", "proxy", "target", "hm08",
+                        "fantasy", "common", "materials", "textures"
+                    }
+                    if len(mesh_descriptor_files) == 1:
+                        asset_folder = mesh_descriptor_files[0]
+                    elif rel_parts and rel_parts[-1].lower() not in skip_names:
+                        asset_folder = rel_parts[-1]
+                    else:
+                        asset_folder = os.path.splitext(zip_file)[0].replace("hm08-", "").replace("common-", "").replace("fantasy-", "")
 
-                                elif ext == '.mhclo' or (has_clothing_sibling and ext in ['.obj', '.mhmat', '.mat', '.png', '.jpg', '.jpeg']):
-                                    parent_dir_name = os.path.basename(root).strip().lower()
-                                    if parent_dir_name and parent_dir_name not in ["", "data", "resource", "temp", pack_folder_name.lower(), os.path.basename(temp_dir).lower()]:
-                                        sub_route = os.path.join("clothes", active_target_mesh, os.path.basename(root))
-                                    else:
-                                        sub_route = os.path.join("clothes", active_target_mesh, base_item_name)
+                    # Build final destination directory
+                    if category == "themes":
+                        dest_dir = os.path.join(user_data_path, "themes")
+                    elif category in ["skybox", "floor"]:
+                        dest_dir = os.path.join(user_data_path, "shaders", category, asset_folder)
+                    elif category in ["target", "rigs", "poses", "expressions", "animations"]:
+                        dest_dir = os.path.join(user_data_path, category, active_mesh)
+                    elif category == "props":
+                        dest_dir = os.path.join(user_data_path, "props", asset_folder)
+                    elif category in ["eyes", "skins"]:
+                        dest_dir = os.path.join(user_data_path, category, active_mesh)
+                    else:
+                        dest_dir = os.path.join(user_data_path, category, active_mesh, asset_folder)
 
-                                elif "skybox" in pack_type or "skybox" in rel_zip_route or "skybox" in file_lower:
-                                    parent_dir_name = os.path.basename(root).strip().lower()
-                                    unique_skybox_folder = os.path.basename(root) if (parent_dir_name and parent_dir_name not in ["", "data", "resource", "materials", "temp", os.path.basename(temp_dir).lower()]) else pack_key[:-4].replace("common-", "")
-                                    sub_route = os.path.join("shaders", "skybox", unique_skybox_folder)
+                    for file in files:
+                        src_file = os.path.join(root, file)
 
-                                elif "floor" in pack_type or "floor" in rel_zip_route or "floor" in file_lower:
-                                    parent_dir_name = os.path.basename(root).strip().lower()
-                                    unique_floor_folder = os.path.basename(root) if (parent_dir_name and parent_dir_name not in ["", "data", "resource", "temp", os.path.basename(temp_dir).lower()]) else pack_key[:-4].replace("common-", "")
-                                    sub_route = os.path.join("shaders", "floor", unique_floor_folder)
-
-                                elif "themes" in rel_zip_route or (ext == '.json' and "theme" in rel_zip_route):
-                                    sub_route = "themes"
-
-                                elif "mhskel" in rel_zip_route or "rig" in rel_zip_route or ext == '.mhskel':
-                                    sub_route = os.path.join("rigs", active_target_mesh)
-
-                                elif "poses" in rel_zip_route or ext == '.mhp':
-                                    sub_route = "poses"
-
-                                elif "expressions" in rel_zip_route or ext == '.mhs':
-                                    sub_route = "expressions"
-
-                                elif "animations" in rel_zip_route or ext == '.bvh':
-                                    sub_route = "animations"
-
-                                elif "props" in rel_zip_route:
-                                    sub_route = os.path.join("props", base_item_name)
-
-                                elif "proxy" in rel_zip_route or "proxy" in pack_type:
-                                    if ext in ['.png', '.jpg', '.jpeg', '.mhmat', '.mat']:
-                                        sub_route = os.path.join("proxy", active_target_mesh, base_item_name, "materials") if (ext in ['.png', '.jpg', '.jpeg'] and not file_lower.endswith('.thumb')) else os.path.join("proxy", active_target_mesh, base_item_name)
-                                    else:
-                                        sub_route = os.path.join("proxy", active_target_mesh, base_item_name)
-
-                                elif "eyes" in rel_zip_route or "eyes" in file_lower:
-                                    sub_route = os.path.join("eyes", active_target_mesh, "materials") if (ext in ['.png', '.jpg', '.jpeg'] and not file_lower.endswith('.thumb')) else os.path.join("eyes", active_target_mesh)
-
-                                elif "skin" in rel_zip_route or "skin" in file_lower or ("material" in root_lower and not any(k in file_lower for k in ["hair", "eyebrow", "eye", "teeth", "tongue"])):
-                                    sub_route = os.path.join("skins", active_target_mesh, "materials") if (ext in ['.png', '.jpg', '.jpeg'] and not file_lower.endswith('.thumb')) else os.path.join("skins", active_target_mesh)
-
-                                else:
-                                    parent_dir_name = os.path.basename(root).strip().lower()
-                                    folder_lbl = os.path.basename(root) if (parent_dir_name and parent_dir_name not in ["", "data", "resource", "temp", pack_folder_name.lower(), os.path.basename(temp_dir).lower()]) else base_item_name
-                                    sub_route = os.path.join("clothes", active_target_mesh, folder_lbl)
-                        else:
-                            sub_route = os.path.normpath(os.path.join(os.path.relpath(root, temp_dir))).replace("data/", "")
-
-                        final_destination = os.path.join(user_data_path, sub_route, file).replace("\\", "/")
-                        os.makedirs(os.path.dirname(final_destination), exist_ok=True)
-
-                        potential_mhbin = final_destination + "bin"
-                        if os.path.exists(potential_mhbin):
+                        file_category = category
+                        if file.lower().endswith((".mhpose", ".mhp")) and "expressions" in allowed_types and "poses" in allowed_types:
                             try:
-                                os.remove(potential_mhbin)
+                                with open(src_file, "r", encoding="utf-8", errors="ignore") as f_pose:
+                                    pose_text = f_pose.read(1024).lower()
+                                if "expression" in file.lower() or "tag expression" in pose_text:
+                                    file_category = "expressions"
+                                else:
+                                    file_category = "poses"
                             except Exception:
                                 pass
 
-                        shutil.copy2(source_file, final_destination)
+                        if file_category in ["target", "rigs", "poses", "expressions", "animations"]:
+                            final_dst = os.path.join(user_data_path, file_category, active_mesh, file)
+                        elif len(mesh_descriptor_files) > 1:
+                            item_base = os.path.splitext(file)
+                            matched_owner = next((m for m in mesh_descriptor_files if item_base.lower().startswith(m.lower())), item_base)
+                            final_dst = os.path.join(user_data_path, file_category, active_mesh, matched_owner, file)
+                        else:
+                            final_dst = os.path.join(dest_dir, file)
+
+                        copy_and_sanitize_file(src_file, final_dst)
+
 
                 unzipper.cleanupUnzip()
                 processed_count += 1
             except Exception as e:
-                print(f"[Batch Extract Failed] Missing or broken elements in {zip_file}: {str(e)}")
+                print(f"[Batch Extract Failed] {zip_file}: {str(e)}")
                 failed_count += 1
-                continue
+
+        # 2. Process Creator Portal Staged Folders (Asset Mode)
+        for folder_id in staged_dirs:
+            staged_folder = os.path.join(self.local_install_destination, folder_id)
+            asset_meta = next(
+                (a for a in self.manifest_data.get("assets", []) if str(a.get("id")) == folder_id),
+                {}
+            )
+            allowed_types = normalize_types(asset_meta.get("type", "clothes"))
+            category = allowed_types[0] if allowed_types else "clothes"
+
+            if category in ["target", "rigs", "poses", "expressions", "animations"]:
+                dest_dir = os.path.join(user_data_path, category, default_mesh)
+            else:
+                dest_dir = os.path.join(user_data_path, category, default_mesh, folder_id)
+
+            for fname in os.listdir(staged_folder):
+                src_file = os.path.join(staged_folder, fname)
+                if os.path.isfile(src_file):
+                    copy_and_sanitize_file(src_file, os.path.join(dest_dir, fname))
+            processed_count += 1
 
         self.mh_glob.MainWindow.syncRepositories()
         completion_msg = f"Batch extraction complete!\nSuccessfully Unpacked: {processed_count} packages."
         if failed_count > 0:
             completion_msg += f"\nSkipped Errors: {failed_count} packages."
-
         self.meta_display.setText(completion_msg)
         QMessageBox.information(self, "Batch Process Finished", completion_msg)
 
