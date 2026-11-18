@@ -1,5 +1,5 @@
 """
-MakeHuman 2 Community Archive Downloader V4.7 - Elvaerwyn_MH2 2026
+MakeHuman 2 Community Archive Downloader V4.9 - Elvaerwyn_MH2 2026
 Completely Independent Visual Content Browser, Search Engine, Cart & Favorites Matrix
 """
 
@@ -304,10 +304,36 @@ class MH2AssetBrowserPanel(QWidget):
         ribbon.addWidget(self.btn_view_favs)
         ribbon.addWidget(self.btn_view_cart)
         layout.addLayout(ribbon)
+        search_row = QHBoxLayout()
+
         self.search_bar = QLineEdit()
         self.search_bar.setPlaceholderText("🔍 Search registry by asset name or tags...")
         self.search_bar.textChanged.connect(lambda: self.filter_browser_grid())
-        layout.addWidget(self.search_bar)
+        search_row.addWidget(self.search_bar, 2)
+
+        self.category_filter = QComboBox()
+        self.category_filter.addItems([
+            "All Categories",
+            "Clothes",
+            "Hair",
+            "Skins / Materials",
+            "Models",
+            "Poses",
+            "Expressions",
+            "Targets / Morphs",
+            "Proxies",
+            "Rigs",
+            "Props",
+            "Skyboxes",
+            "Floors",
+            "Animations",
+            "Eyes / Eyebrows / Lashes"
+        ])
+        self.category_filter.currentIndexChanged.connect(lambda: self.filter_browser_grid())
+        search_row.addWidget(self.category_filter, 1)
+
+        layout.addLayout(search_row)
+
         self.grid_scroll = QScrollArea()
         self.grid_scroll.setWidgetResizable(True)
         self.grid_scroll.setMinimumHeight(240)
@@ -506,10 +532,11 @@ class MH2AssetBrowserPanel(QWidget):
                     col += 1
                     if col >= columns_limit:
                         col = 0; row += 1
-            else:
+            if "assets" in self.manifest_data:
                 assets = self.manifest_data.get("assets", [])
                 for index, asset_data in enumerate(assets):
-                    card = MH2AssetCard(index, asset_data, "ASSET_MODE", self)
+                    asset_key = asset_data.get("id", f"asset_{index}")
+                    card = MH2AssetCard(asset_key, asset_data, "ASSET_MODE", self)
                     self.grid_layout.addWidget(card, row, col)
                     col += 1
                     if col >= columns_limit:
@@ -522,6 +549,7 @@ class MH2AssetBrowserPanel(QWidget):
         self.sync_cart_label_counters()
         QApplication.restoreOverrideCursor()
 
+
     def on_dev_mode_toggled(self, checked):
         if not checked:
             # Automatically remove any legacy-* packs from the cart if Dev Mode is turned off
@@ -532,6 +560,25 @@ class MH2AssetBrowserPanel(QWidget):
     def filter_browser_grid(self):
         query = self.search_bar.text().lower().strip()
         dev_mode = hasattr(self, 'chk_dev_mode') and self.chk_dev_mode.isChecked()
+        selected_cat = self.category_filter.currentText() if hasattr(self, 'category_filter') else "All Categories"
+
+        cat_aliases = {
+            "Clothes": {"clothes", "clothing"},
+            "Hair": {"hair"},
+            "Skins / Materials": {"skin", "skins", "material", "materials"},
+            "Models": {"model", "models"},
+            "Poses": {"pose", "poses"},
+            "Expressions": {"expression", "expressions"},
+            "Targets / Morphs": {"target", "targets"},
+            "Proxies": {"proxy", "proxymeshes"},
+            "Rigs": {"rig", "rigs"},
+            "Props": {"prop", "props"},
+            "Skyboxes": {"skybox"},
+            "Floors": {"floor"},
+            "Animations": {"animation", "animations"},
+            "Eyes / Eyebrows / Lashes": {"eye", "eyes", "eyebrow", "eyebrows", "eyelash", "eyelashes", "teeth", "tongue"}
+        }
+        target_slugs = cat_aliases.get(selected_cat, set())
 
         for i in range(self.grid_layout.count()):
             card = self.grid_layout.itemAt(i).widget()
@@ -541,15 +588,30 @@ class MH2AssetBrowserPanel(QWidget):
                     card.hide()
                     continue
 
-                title = str(card.data.get("title", card.data.get("name", card.key))).lower()
-                descr = str(card.data.get("descr", card.data.get("description", ""))).lower()
-
                 if self.current_view_mode == "FAVORITES" and card.key not in self.favorites_db["assets"]:
                     card.hide()
                     continue
                 if self.current_view_mode == "CART" and card.key not in self.download_cart:
                     card.hide()
                     continue
+
+                # Category filter check
+                if target_slugs:
+                    raw_type = card.data.get("type", "")
+                    if isinstance(raw_type, list):
+                        card_types = {str(t).strip().lower() for t in raw_type}
+                    else:
+                        card_types = {t.strip().lower() for t in str(raw_type).split(",") if t.strip()}
+
+                    # Also check key/description fallback if manifest "type" is missing
+                    fallback_text = f"{card.key} {card.data.get('descr', '')} {card.data.get('description', '')}".lower()
+                    matches_type = bool(card_types & target_slugs) or (not card_types and any(s in fallback_text for s in target_slugs))
+                    if not matches_type:
+                        card.hide()
+                        continue
+
+                title = str(card.data.get("title", card.data.get("name", card.key))).lower()
+                descr = str(card.data.get("descr", card.data.get("description", ""))).lower()
 
                 if query and (query not in title and query not in descr):
                     card.hide()
@@ -902,6 +964,9 @@ class MH2AssetBrowserPanel(QWidget):
                 return "animations"
             if ".mhskel" in exts and "rigs" in allowed:
                 return "rigs"
+            if ".mhm" in exts and "models" in allowed:
+                return "models"
+
 
             # 3. Material-only folder (no .mhclo or .obj) -> skins
             if "skins" in allowed and ".mhclo" not in exts and ".obj" not in exts and ".mhmat" in exts:
@@ -1000,8 +1065,8 @@ class MH2AssetBrowserPanel(QWidget):
                         asset_folder = os.path.splitext(zip_file)[0].replace("hm08-", "").replace("common-", "").replace("fantasy-", "")
 
                     # Build final destination directory
-                    if category == "themes":
-                        dest_dir = os.path.join(user_data_path, "themes")
+                    if category in ["themes", "models"]:
+                        dest_dir = os.path.join(user_data_path, category)
                     elif category in ["skybox", "floor"]:
                         dest_dir = os.path.join(user_data_path, "shaders", category, asset_folder)
                     elif category in ["target", "rigs", "poses", "expressions", "animations"]:
