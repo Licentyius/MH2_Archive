@@ -1,13 +1,15 @@
 """
-MakeHuman 2 Community Archive Downloader V4.9 - Elvaerwyn_MH2 2026
+MakeHuman 2 Community Archive Downloader V5.0 - Elvaerwyn_MH2 2026
 Completely Independent Visual Content Browser, Search Engine, Cart & Favorites Matrix
 """
 
 import os
 import json
 import urllib.request
+import urllib.error
 import shutil
 import zipfile
+import ssl
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QPixmap, QIcon
 from PySide6.QtWidgets import (
@@ -16,6 +18,19 @@ from PySide6.QtWidgets import (
     QFrame, QComboBox, QApplication, QMessageBox, QGroupBox, 
     QStyle, QDockWidget, QTabWidget, QCheckBox
 )
+
+def safe_urlopen(req, timeout=15):
+    """Attempts verified HTTPS (including Windows Root CA store), with fallback for Steam/AV cert bundles."""
+    try:
+        ctx = ssl.create_default_context()
+        if hasattr(ctx, "load_default_certs"):
+            ctx.load_default_certs(ssl.Purpose.SERVER_AUTH)
+        return urllib.request.urlopen(req, timeout=timeout, context=ctx)
+    except (ssl.SSLError, urllib.error.URLError) as err:
+        if "CERTIFICATE_VERIFY_FAILED" in str(err) or isinstance(err, ssl.SSLError):
+            unverified_ctx = ssl._create_unverified_context()
+            return urllib.request.urlopen(req, timeout=timeout, context=unverified_ctx)
+        raise
 
 # ===========================================
 # SECTION 1: THE BACKGROUND DOWNLOAD WORKER
@@ -61,7 +76,8 @@ class AssetDownloadWorker(QThread):
                 os.makedirs(os.path.dirname(destination_path), exist_ok=True)
                 
                 req = urllib.request.Request(source_url, headers={"User-Agent": "MH2_Archive_Downloader/3.2"})
-                with urllib.request.urlopen(req, timeout=25) as response:
+                with safe_urlopen(req, timeout=25) as response:
+
                     with open(destination_path, "wb") as output_file:
                         output_file.write(response.read())
                 
@@ -349,9 +365,14 @@ class MH2AssetBrowserPanel(QWidget):
         # NEW DEEP INSPECTION TAB MATRIX LAYOUT
         # ======================================
         inspection_group = QGroupBox("Target Package Deep Inspector Matrix")
+        inspection_group.setStyleSheet(
+            "QGroupBox { margin-top: 12px; padding-top: 10px; font-weight: bold; } "
+            "QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; left: 8px; padding: 0 4px; }"
+        )
         inspection_layout = QVBoxLayout(inspection_group)
-        inspection_layout.setContentsMargins(4, 4, 4, 4)
+        inspection_layout.setContentsMargins(6, 14, 6, 6)
         inspection_layout.setSpacing(4)
+
         
         self.inspect_tabs = QTabWidget()
         
@@ -421,7 +442,7 @@ class MH2AssetBrowserPanel(QWidget):
             def run(self):
                 try:
                     req = urllib.request.Request(url, headers={"User-Agent": "MH2_Archive_Downloader/3.2"})
-                    with urllib.request.urlopen(req, timeout=15) as response:
+                    with safe_urlopen(req, timeout=15) as response:
                         with open(dest_path, "wb") as f:
                             f.write(response.read())
                     self.done.emit(True)
@@ -506,7 +527,7 @@ class MH2AssetBrowserPanel(QWidget):
         
         try:
             req = urllib.request.Request(manifest_url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=10) as response:
+            with safe_urlopen(req, timeout=10) as response:
                 self.manifest_data = json.loads(response.read().decode('utf-8'))
             columns_limit = 2
             row, col = 0, 0
@@ -804,7 +825,7 @@ class MH2AssetBrowserPanel(QWidget):
         repo_path = self.repositories.get(active_repo, "Makehuman-2/MH2_Asset_Repository_CC-By")
         
         if repo_path.startswith("http"):
-            if "://githubusercontent.com" in repo_path:
+            if "githubusercontent.com" in repo_path:
                 parts = repo_path.split("://githubusercontent.com")[-1].split("/")
                 if len(parts) >= 2:
                     repo_path = f"{parts[0]}/{parts[1]}"
@@ -939,6 +960,7 @@ class MH2AssetBrowserPanel(QWidget):
                     f_out.writelines(cleaned)
             else:
                 shutil.copy2(src, dst)
+
         def classify_directory_for_multitype(dir_path, rel_lower, files_in_dir, allowed):
             exts = {os.path.splitext(f)[1].lower() for f in files_in_dir}
 
@@ -1069,7 +1091,13 @@ class MH2AssetBrowserPanel(QWidget):
                         dest_dir = os.path.join(user_data_path, category)
                     elif category in ["skybox", "floor"]:
                         dest_dir = os.path.join(user_data_path, "shaders", category, asset_folder)
-                    elif category in ["target", "rigs", "poses", "expressions", "animations"]:
+                    elif category == "target":
+                        if rel_parts and rel_parts[-1].lower() == "icons":
+                            dest_dir = os.path.join(user_data_path, "target", active_mesh, "icons")
+                        else:
+                            target_sub = rel_parts[-1] if (rel_parts and rel_parts[-1].lower() not in skip_names) else "community"
+                            dest_dir = os.path.join(user_data_path, "target", active_mesh, target_sub)
+                    elif category in ["rigs", "poses", "expressions", "animations"]:
                         dest_dir = os.path.join(user_data_path, category, active_mesh)
                     elif category == "props":
                         dest_dir = os.path.join(user_data_path, "props", asset_folder)
@@ -1093,16 +1121,23 @@ class MH2AssetBrowserPanel(QWidget):
                             except Exception:
                                 pass
 
-                        if file_category in ["target", "rigs", "poses", "expressions", "animations"]:
+                        if file_category == "target":
+                            if (rel_parts and rel_parts[-1].lower() == "icons") or file.lower().endswith(".png"):
+                                final_dst = os.path.join(user_data_path, "target", active_mesh, "icons", file)
+                            else:
+                                target_sub = rel_parts[-1] if (rel_parts and rel_parts[-1].lower() not in skip_names) else "community"
+                                final_dst = os.path.join(user_data_path, "target", active_mesh, target_sub, file)
+                        elif file_category in ["rigs", "poses", "expressions", "animations"]:
                             final_dst = os.path.join(user_data_path, file_category, active_mesh, file)
                         elif len(mesh_descriptor_files) > 1:
-                            item_base = os.path.splitext(file)
+                            item_base = os.path.splitext(file)[0]
                             matched_owner = next((m for m in mesh_descriptor_files if item_base.lower().startswith(m.lower())), item_base)
                             final_dst = os.path.join(user_data_path, file_category, active_mesh, matched_owner, file)
                         else:
                             final_dst = os.path.join(dest_dir, file)
 
                         copy_and_sanitize_file(src_file, final_dst)
+
 
 
                 unzipper.cleanupUnzip()
@@ -1121,7 +1156,9 @@ class MH2AssetBrowserPanel(QWidget):
             allowed_types = normalize_types(asset_meta.get("type", "clothes"))
             category = allowed_types[0] if allowed_types else "clothes"
 
-            if category in ["target", "rigs", "poses", "expressions", "animations"]:
+            if category == "target":
+                dest_dir = os.path.join(user_data_path, "target", default_mesh, "community")
+            elif category in ["rigs", "poses", "expressions", "animations"]:
                 dest_dir = os.path.join(user_data_path, category, default_mesh)
             else:
                 dest_dir = os.path.join(user_data_path, category, default_mesh, folder_id)
@@ -1140,6 +1177,7 @@ class MH2AssetBrowserPanel(QWidget):
         QMessageBox.information(self, "Batch Process Finished", completion_msg)
 
     def execute_repo_bulk_download(self):
+
         visible_keys = []
         for i in range(self.grid_layout.count()):
             card = self.grid_layout.itemAt(i).widget()
